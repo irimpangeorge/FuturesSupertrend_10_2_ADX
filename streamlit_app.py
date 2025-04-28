@@ -21,6 +21,27 @@ instruments = {
 }
 
 # ---------------------- FUNCTIONS ----------------------
+def fetch_and_displaydata(instrument, atrperiod, multiplier, timeframe, quantity):
+    if is_mcx_tender_period(instrument):
+        st.warning("🚫 MCX trade skipped due to tender period (3 days before expiry).")
+    else:
+        df = fetch_data(instrument, timeframe)
+
+        if not df.empty:
+            df = apply_indicators(df, atrperiod, multiplier )
+            df = generate_signals(df)
+
+            st.subheader("📊 Signals Table")
+            st.dataframe(df[["close", "supertrend", "di_plus", "di_minus", "signal"]].tail(2000))
+
+            st.subheader("📉 Price vs Supertrend")
+            st.line_chart(df[["close", "supertrend"]])
+
+            st.subheader("📍 Last Signal")
+            latest_signal = df["signal"].dropna().iloc[-1] if not df["signal"].dropna().empty else "No signal"
+            st.success(f"🔔 Last Signal: {latest_signal}")
+        return
+
 def get_security_id(instrument):
     ssl_context = ssl.create_default_context(cafile=certifi.where())
 
@@ -70,30 +91,20 @@ def is_mcx_tender_period(instrument):
     tender_start = expiry - timedelta(days=3)
     return datetime.now().date() >= tender_start.date() and instrument["segment"] == "MCX_COMM"
 
-def fetch_data(instrument):
+def fetch_data(instrument, timeframe):
     today = datetime.today()
     from_date = (today - timedelta(days=90)).strftime("%Y-%m-%d")
     to_date = today.strftime("%Y-%m-%d")
 
     securityid=get_security_id(instrument)
-    if(instrument["segment"] == "MCX_COMM"):
-        payload = {
-            "securityId": str(securityid),
-            "exchangeSegment": instrument["segment"],
-            "instrument": instrument["instrumentID"],
-            "interval": 60,
-            "fromDate": from_date,
-            "toDate": to_date
-        }
-    else:
-         payload = {
+    payload = {
             "securityId": str(securityid),
             "exchangeSegment": instrument["segment"],
             "instrument": instrument["instrumentID"],
             "interval": 1,
             "fromDate": from_date,
             "toDate": to_date
-        }
+            }
 
     headers = {
         "access-token": API_TOKEN,
@@ -112,15 +123,18 @@ def fetch_data(instrument):
         st.warning("No data returned.")
         return pd.DataFrame()
         
+    df = pd.DataFrame(data, columns=["timestamp", "open", "high", "low", "close", "volume"])
+    df["timestamp"] = pd.to_datetime(df["timestamp"], unit='s', errors='coerce')
+    df.set_index("timestamp", inplace=True)
+    df = df[["open", "high", "low", "close", "volume"]].astype(float)
+    df.index = df.index.tz_localize("UTC")
+    df.index = df.index.tz_convert("Asia/Kolkata")
     if(instrument["segment"] != "MCX_COMM"):
-        df = pd.DataFrame(data, columns=["timestamp", "open", "high", "low", "close", "volume"])
-        df["timestamp"] = pd.to_datetime(df["timestamp"], unit='s', errors='coerce')
-        df.set_index("timestamp", inplace=True)
-        df = df[["open", "high", "low", "close", "volume"]].astype(float)
-        df.index = df.index.tz_localize("UTC")
-        df.index = df.index.tz_convert("Asia/Kolkata")
         df = df.between_time("09:15", "15:30") 
-        return df.resample("75min").agg({
+    else:
+        df = df.between_time("10.00", "23.00") 
+
+    return df.resample(timeframe).agg({
         "open": "first",
         "high": "max",
         "low": "min",
@@ -128,22 +142,10 @@ def fetch_data(instrument):
         "volume": "sum"
     }).dropna()
 
-    else:
-
-        df = pd.DataFrame(data, columns=["timestamp", "open", "high", "low", "close", "volume"])
-        df["timestamp"] = pd.to_datetime(df["timestamp"], unit='s', errors='coerce')
-
-        # Drop rows with bad or missing timestamps
-        df.dropna(subset=["timestamp"], inplace=True)
-        df.set_index("timestamp", inplace=True)
-        df.index = df.index.tz_localize("UTC")
-        df.index = df.index.tz_convert("Asia/Kolkata")
-        df = df.between_time("10.00", "23.00") 
-        return df
-
-def apply_indicators(df):
-    st_indicator = ta.supertrend(df["high"], df["low"], df["close"], length=10, multiplier=2)
-    df["supertrend"] = st_indicator["SUPERT_10_2.0"]
+def apply_indicators(df, atr_period, multipliers):
+    st_indicator = ta.supertrend(df["high"], df["low"], df["close"], length = atr_period, multiplier = multipliers)
+    trend = f"SUPERT_{atr_period}_{float(multipliers)}"
+    df["supertrend"] = st_indicator[trend]
 
     adx = ta.adx(df["high"], df["low"], df["close"])
     df["di_plus"] = adx["DMP_14"]
@@ -178,21 +180,12 @@ st.title("📈 Futures Supertrend(10,2)-ADX")
 instrument_name = st.selectbox("Select Instrument", list(instruments.keys()))
 instrument = instruments[instrument_name]
 
-if is_mcx_tender_period(instrument):
-    st.warning("🚫 MCX trade skipped due to tender period (3 days before expiry).")
-else:
-    df = fetch_data(instrument)
+st.sidebar.header("Parameters")
+nf_atr_period = st.sidebar.number_input("ATR Period",min_value=0,max_value=None,value=10,step=1)
+nf_multiplier = st.sidebar.number_input("Multiplier",min_value=0,max_value=None,value=2,step=1)
+nf_timeframe = st.sidebar.number_input("Time Frame",min_value=0,max_value=None,value=5,step=1)
+nf_timeframe= f"{nf_timeframe}min"
+nf_quantity = st.sidebar.number_input("Quantity",min_value=0,max_value=None,value=750,step=75)
 
-    if not df.empty:
-        df = apply_indicators(df)
-        df = generate_signals(df)
+fetch_and_displaydata(instrument,nf_atr_period,nf_multiplier,nf_timeframe,nf_multiplier)
 
-        st.subheader("📊 Signals Table")
-        st.dataframe(df[["close", "supertrend", "di_plus", "di_minus", "signal"]].tail(2000))
-
-        st.subheader("📉 Price vs Supertrend")
-        st.line_chart(df[["close", "supertrend"]])
-
-        st.subheader("📍 Last Signal")
-        latest_signal = df["signal"].dropna().iloc[-1] if not df["signal"].dropna().empty else "No signal"
-        st.success(f"🔔 Last Signal: {latest_signal}")
