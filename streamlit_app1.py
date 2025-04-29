@@ -32,13 +32,13 @@ def fetch_and_displaydata(instrument, atrperiod, multiplier, timeframe, quantity
             df = generate_signals(df)
 
             st.subheader("📊 Signals Table")
-            st.dataframe(df[["close", "supertrend", "di_plus", "di_minus", "entry", "exit"]].tail(2000))
+            st.dataframe(df[["close", "supertrend", "di_plus", "di_minus", "signal"]].tail(2000))
 
             st.subheader("📉 Price vs Supertrend")
             st.line_chart(df[["close", "supertrend"]])
 
             st.subheader("📍 Last Signal")
-            latest_signal = df["entry"].dropna().iloc[-1] if not df["entry"].dropna().empty else "No signal"
+            latest_signal = df["signal"].dropna().iloc[-1] if not df["signal"].dropna().empty else "No signal"
             st.success(f"🔔 Last Signal: {latest_signal}")
         return
 
@@ -144,7 +144,7 @@ def fetch_data(instrument, timeframe):
 
 def apply_indicators(df, atr_period, multipliers):
     st_indicator = ta.supertrend(df["high"], df["low"], df["close"], length = atr_period, multiplier = multipliers)
-    trend = f"{"SUPERT"}{"_"}{atr_period}{"_"}{float(multipliers)}"
+    trend = f"SUPERT_{atr_period}_{float(multipliers)}"
     df["supertrend"] = st_indicator[trend]
 
     adx = ta.adx(df["high"], df["low"], df["close"])
@@ -156,29 +156,21 @@ def apply_indicators(df, atr_period, multipliers):
 
 def generate_signals(df):
     df["long_entry"] = (df["close"] > df["supertrend"]) & (df["di_plus"] > df["di_minus"])
-    df["long_exit"] = (df["close"] < df["supertrend"])
-    df["short_entry"] = (df["close"] < df["supertrend"])
-    df["short_exit"] = (df["close"] > df["supertrend"])
-    df["entry"] = None
-    df["exit"] = None
+    df["short_entry"] = (df["close"] < df["supertrend"]) & (df["di_minus"] > df["di_plus"])
+    df["signal"] = None
 
     current_pos = None
 
     for i in range(len(df)):
-        df.at[df.index[i], "exit"] = None
-        df.at[df.index[i], "entry"] = None
-        if current_pos == "short" and df["short_exit"].iloc[i]:
-            df.at[df.index[i], "exit"] = "SELL_EXIT"
-            current_pos = None
-        if current_pos == "long" and df["long_exit"].iloc[i]:
-            df.at[df.index[i], "exit"] = "BUY_EXIT"
-            current_pos = None
-        if current_pos == None and df["long_entry"].iloc[i]:
-            df.at[df.index[i], "entry"] = "BUY"
+        if current_pos != "long" and df["long_entry"].iloc[i]:
+            df.at[df.index[i], "signal"] = "BUY"
             current_pos = "long"
-        if current_pos == None and df["short_entry"].iloc[i]:
-            df.at[df.index[i], "entry"] = "SELL"
+        elif current_pos != "short" and df["short_entry"].iloc[i]:
+            df.at[df.index[i], "signal"] = "SELL"
             current_pos = "short"
+        else:
+            df.at[df.index[i], "signal"] = None
+
     return df
 
 # ---------------------- STREAMLIT UI ----------------------
@@ -192,18 +184,8 @@ st.sidebar.header("Parameters")
 nf_atr_period = st.sidebar.number_input("ATR Period",min_value=0,max_value=None,value=10,step=1)
 nf_multiplier = st.sidebar.number_input("Multiplier",min_value=0,max_value=None,value=2,step=1)
 nf_timeframe = st.sidebar.number_input("Time Frame",min_value=0,max_value=None,value=5,step=1)
-nf_timeframe= f"{nf_timeframe}{"min"}"
+nf_timeframe= f"{nf_timeframe}min"
 nf_quantity = st.sidebar.number_input("Quantity",min_value=0,max_value=None,value=750,step=75)
 
 fetch_and_displaydata(instrument,nf_atr_period,nf_multiplier,nf_timeframe,nf_multiplier)
-
-
-
-
-
-
-
-
-
-
 
