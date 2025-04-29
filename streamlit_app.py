@@ -34,8 +34,8 @@ def fetch_and_displaydata(instrument, atrperiod, multiplier, timeframe, quantity
             st.subheader("📊 Signals Table")
             st.dataframe(df[["close", "supertrend", "di_plus", "di_minus", "entry", "exit"]].tail(2000))
 
-            st.subheader("📉 Price vs Supertrend")
-            st.line_chart(df[["close", "supertrend"]])
+            #st.subheader("📉 Price vs Supertrend")
+            #st.line_chart(df[["close", "supertrend"]])
 
             st.subheader("📍 Last Signal")
             latest_signal = df["entry"].dropna().iloc[-1] if not df["entry"].dropna().empty else "No signal"
@@ -144,7 +144,7 @@ def fetch_data(instrument, timeframe):
 
 def apply_indicators(df, atr_period, multipliers):
     st_indicator = ta.supertrend(df["high"], df["low"], df["close"], length = atr_period, multiplier = multipliers)
-    trend = f"{"SUPERT"}{"_"}{atr_period}{"_"}{float(multipliers)}"
+    trend = f"SUPERT_{atr_period}_{float(multipliers)}"
     df["supertrend"] = st_indicator[trend]
 
     adx = ta.adx(df["high"], df["low"], df["close"])
@@ -192,7 +192,7 @@ st.sidebar.header("Parameters")
 nf_atr_period = st.sidebar.number_input("ATR Period",min_value=0,max_value=None,value=10,step=1)
 nf_multiplier = st.sidebar.number_input("Multiplier",min_value=0,max_value=None,value=2,step=1)
 nf_timeframe = st.sidebar.number_input("Time Frame",min_value=0,max_value=None,value=5,step=1)
-nf_timeframe= f"{nf_timeframe}{"min"}"
+nf_timeframe= f"{nf_timeframe}min"
 nf_quantity = st.sidebar.number_input("Quantity",min_value=0,max_value=None,value=750,step=75)
 
 fetch_and_displaydata(instrument,nf_atr_period,nf_multiplier,nf_timeframe,nf_multiplier)
