@@ -256,11 +256,11 @@ def generate_signals(df):
         df.at[df.index[i], "entry"] = None
         if current_pos == "short" and df["short_exit"].iloc[i]:
             df.at[df.index[i], "exit"] = "COVER"
-            df.at[df.index[i], "entry"] = "NO SIGNAL"
+            df.at[df.index[i], "entry"] = "None"
             current_pos = None
         if current_pos == "long" and df["long_exit"].iloc[i]:
             df.at[df.index[i], "exit"] = "SELL"
-            df.at[df.index[i], "entry"] = "NO SIGNAL"
+            df.at[df.index[i], "entry"] = "None"
             current_pos = None
         if current_pos == None and df["long_entry"].iloc[i]:
             df.at[df.index[i], "entry"] = "BUY"
