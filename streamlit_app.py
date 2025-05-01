@@ -11,13 +11,17 @@ import os
 from datetime import datetime, timedelta
 
 # ---------------------- CONFIG ----------------------
-API_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzQ3OTAxNjU5LCJ0b2tlbkNvbnN1bWVyVHlwZSI6IlNFTEYiLCJ3ZWJob29rVXJsIjoiIiwiZGhhbkNsaWVudElkIjoiMTEwNDEwODg5MyJ9.Bg1TsNnNTRd6znWPQNgcBB4OAW8I0zjQmwjDcs-o2k3dJJlvGDPnmVgYFb82ID1sur6wN7lNtSh-tnH1L6dGyg"  # Replace with your Dhan access token
+#API_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzQ3OTAxNjU5LCJ0b2tlbkNvbnN1bWVyVHlwZSI6IlNFTEYiLCJ3ZWJob29rVXJsIjoiIiwiZGhhbkNsaWVudElkIjoiMTEwNDEwODg5MyJ9.Bg1TsNnNTRd6znWPQNgcBB4OAW8I0zjQmwjDcs-o2k3dJJlvGDPnmVgYFb82ID1sur6wN7lNtSh-tnH1L6dGyg"  # Replace with your Dhan access token
 API_URL = "https://api.dhan.co/v2/charts/intraday"
 
 
 USERNAME = "admin"
 PASSWORD = "password123"
 SETTINGS_FILE = "settings.json"
+SETTINGS_NIFTY_FILE = "nifty_settings.json"
+SETTINGS_BNF_FILE = "bnf_settings.json"
+SETTINGS_GOLDM_FILE = "goldm_settings.json"
+SETTINGS_SILVERM_FILE = "silverm_settings.json"
 # ---------------------- Sessions ----------------------
 if "logged_in" not in st.session_state:
         st.session_state["logged_in"] = False
@@ -49,11 +53,11 @@ def login():
             else:
                 st.error("Invalid username or password")
 
-def fetch_and_displaydata(instrument, atrperiod, multiplier, timeframe, quantity):
+def fetch_and_displaydata(instrument, atrperiod, multiplier, timeframe, quantity, dhan_api):
     if is_mcx_tender_period(instrument):
         st.warning("🚫 MCX trade skipped due to tender period (3 days before expiry).")
     else:
-        df = fetch_data(instrument, timeframe)
+        df = fetch_data(instrument, timeframe, dhan_api)
 
         if not df.empty:
             df = apply_indicators(df, atrperiod, multiplier )
@@ -111,20 +115,27 @@ def get_security_id(instrument):
 
 # Get the latest expiry
     latest_securityid = securityid["SECURITY_ID"].iloc[0]
+    latest_expirydate = securityid["SM_EXPIRY_DATE"].iloc[0]
     
-    return latest_securityid
+    return latest_securityid, latest_expirydate
 
 def is_mcx_tender_period(instrument):
-    expiry = datetime.strptime(instrument["expiry"], "%Y-%m-%d")
+    securityid, expirydate = get_security_id(instrument)
+    ts = pd.Timestamp(expirydate)
+    expiry = ts.date() #datetime.strptime(expirydate, "%Y-%m-%d")
     tender_start = expiry - timedelta(days=3)
-    return datetime.now().date() >= tender_start.date() and instrument["segment"] == "MCX_COMM"
+    return datetime.now().date() >= tender_start and instrument["segment"] == "MCX_COMM"
 
-def fetch_data(instrument, timeframe):
+def fetch_data(instrument, timeframe, dhan_api):
     today = datetime.today()
     from_date = (today - timedelta(days=90)).strftime("%Y-%m-%d")
     to_date = today.strftime("%Y-%m-%d")
 
-    securityid=get_security_id(instrument)
+    if dhan_api=="api token" or not dhan_api:
+        st.warning("Enter a valid api token and try again")
+        return pd.DataFrame()
+        
+    securityid, expirydate = get_security_id(instrument)
     payload = {
             "securityId": str(securityid),
             "exchangeSegment": instrument["segment"],
@@ -135,7 +146,7 @@ def fetch_data(instrument, timeframe):
             }
 
     headers = {
-        "access-token": API_TOKEN,
+        "access-token": dhan_api,
         "Content-Type": "application/json",
 	"Accept": "application/json"
 
@@ -184,37 +195,56 @@ def apply_indicators(df, atr_period, multipliers):
     return df
 
 def display_supertrend():
+
+    col1, col2, col3 = st.columns([6, 1, 1]) 
+    with col3:
+        if st.button("Logout"):
+            st.query_params["auth"] = "0"
+            st.session_state.logged_in = False
+            st.rerun()
+
     st.title("📈 Futures Supertrend(10,2)-ADX")
 
     instrument_name = st.selectbox("Select Instrument", list(instruments.keys()))
     instrument = instruments[instrument_name]
 
-    settings = load_settings()
+    instrument_settings = load_instrument_settings(instrument)
+    common_settings = load_common_settings()
 
     st.sidebar.header("Parameters")
-    nf_atr_period = st.sidebar.number_input("ATR Period", min_value = 0, max_value = None, value = int(settings["atr_period"]), step = 1)
-    nf_multiplier = st.sidebar.number_input("Multiplier", min_value = 0, max_value = None, value = int(settings["multiplier"]), step = 1)
-    nf_timeframe = st.sidebar.number_input("Time Frame", min_value = 0, max_value = None, value = int(settings["time_frame"]), step = 1)
-    nf_quantity = st.sidebar.number_input("Quantity", min_value = 0, max_value = None, value = int(settings["quantity"]), step = 1)
 
-    if st.sidebar.button("💾 Save Settings"):
-        new_settings = {
-            "atr_period": nf_atr_period,
-            "multiplier": nf_multiplier,
-            "time_frame": nf_timeframe,
-            "quantity": nf_quantity
-        }
-        save_settings(new_settings)
-        st.success("✅ Settings saved permanently!")
-        st.rerun()  # Optional: to reflect updated values immediately
+    dhan_api_token = st.sidebar.text_input("Api Token", value = common_settings.get("dhan_api_token",""))
+    nf_atr_period = st.sidebar.number_input("ATR Period", min_value = 0, max_value = None, value = int(instrument_settings["atr_period"]), step = 1)
+    nf_multiplier = st.sidebar.number_input("Multiplier", min_value = 0, max_value = None, value = int(instrument_settings["multiplier"]), step = 1)
+    nf_timeframe = st.sidebar.number_input("Time Frame", min_value = 0, max_value = None, value = int(instrument_settings["time_frame"]), step = 1)
+    nf_quantity = st.sidebar.number_input("Quantity", min_value = 0, max_value = None, value = int(instrument_settings["quantity"]), step = 1)
 
+    sidecol1, sidecol2 = st.sidebar.columns([1, 1]) 
+    with sidecol1:
+        if st.button("💾 Save Settings"):
+            instrument_settings = {
+                "atr_period": nf_atr_period,
+                "multiplier": nf_multiplier,
+                "time_frame": nf_timeframe,
+                "quantity": nf_quantity
+                }
+            common_settings = {
+                "dhan_api_token": dhan_api_token
+            }
+            save_settings(instrument_settings, common_settings, instrument)
+            st.success("✅ Settings saved permanently!")
+            st.rerun()  # Optional: to reflect updated values immediately
+    
+    with sidecol2:
+        st.button("Roll Over")
+    API_TOKEN = dhan_api_token
     st.query_params["auth"] = "1"
-    fetch_and_displaydata(instrument,nf_atr_period,nf_multiplier,nf_timeframe,nf_multiplier)
+    fetch_and_displaydata(instrument,nf_atr_period,nf_multiplier,nf_timeframe,nf_multiplier,dhan_api_token)
 
 def generate_signals(df):
     df["long_entry"] = (df["close"] > df["supertrend"]) & (df["di_plus"] > df["di_minus"])
     df["long_exit"] = (df["close"] < df["supertrend"])
-    df["short_entry"] = (df["close"] < df["supertrend"])
+    df["short_entry"] = (df["close"] < df["supertrend"]) & (df["di_plus"] > df["di_minus"])
     df["short_exit"] = (df["close"] > df["supertrend"])
     df["entry"] = None
     df["exit"] = None
@@ -226,9 +256,11 @@ def generate_signals(df):
         df.at[df.index[i], "entry"] = None
         if current_pos == "short" and df["short_exit"].iloc[i]:
             df.at[df.index[i], "exit"] = "COVER"
+            df.at[df.index[i], "entry"] = "NO SIGNAL"
             current_pos = None
         if current_pos == "long" and df["long_exit"].iloc[i]:
             df.at[df.index[i], "exit"] = "SELL"
+            df.at[df.index[i], "entry"] = "NO SIGNAL"
             current_pos = None
         if current_pos == None and df["long_entry"].iloc[i]:
             df.at[df.index[i], "entry"] = "BUY"
@@ -247,9 +279,18 @@ def main():
     else:
         login()
 
-def load_settings():
-    if os.path.exists(SETTINGS_FILE):
-        with open(SETTINGS_FILE, "r") as f:
+def load_instrument_settings(instrument):
+    if(instrument["Id"] == "1"):
+        settingsfile = SETTINGS_NIFTY_FILE
+    elif(instrument["Id"] == "2"): 
+        settingsfile = SETTINGS_BNF_FILE
+    elif(instrument["Id"] == "3"): 
+        settingsfile = SETTINGS_GOLDM_FILE
+    else:
+        settingsfile = SETTINGS_SILVERM_FILE
+
+    if os.path.exists(settingsfile):
+        with open(settingsfile, "r") as f:
             return json.load(f)
     else:
         # Default settings
@@ -258,13 +299,37 @@ def load_settings():
          "multiplier":2,
          "time_frame":5,
          "quantity":750
-
         }
 
+def load_common_settings():
+        
+    settingsfile = SETTINGS_FILE
 
-def save_settings(settings):
-    with open(SETTINGS_FILE, "w") as f:
-        json.dump(settings, f, indent=2)
+    if os.path.exists(settingsfile):
+        with open(settingsfile, "r") as f:
+            return json.load(f)
+    else:
+        # Default settings
+        return {
+         "dhan_api_token": "api token",
+        }
+    
+def save_settings(instru_settings, common_settings, instrument):
+    if(instrument["Id"] == "1"):
+        settingsfile = SETTINGS_NIFTY_FILE
+    elif(instrument["Id"] == "2"): 
+        settingsfile = SETTINGS_BNF_FILE
+    elif(instrument["Id"] == "3"): 
+        settingsfile = SETTINGS_GOLDM_FILE
+    else:
+        settingsfile = SETTINGS_SILVERM_FILE
+
+    with open(settingsfile, "w") as f:
+        json.dump(instru_settings, f, indent=2)
+    
+    settingsfile = SETTINGS_FILE
+    with open(settingsfile, "w") as f:
+        json.dump(common_settings, f, indent=2)
 # ---------------------- STREAMLIT UI ----------------------
 
 if __name__ == "__main__":
