@@ -214,6 +214,7 @@ def display_supertrend():
     st.sidebar.header("Parameters")
 
     dhan_api_token = st.sidebar.text_input("Api Token", value = common_settings.get("dhan_api_token",""))
+    dhan_client_id = st.sidebar.text_input("Client ID", value = common_settings.get("dhan_client_id",""))
     nf_atr_period = st.sidebar.number_input("ATR Period", min_value = 0, max_value = None, value = int(instrument_settings["atr_period"]), step = 1)
     nf_multiplier = st.sidebar.number_input("Multiplier", min_value = 0, max_value = None, value = int(instrument_settings["multiplier"]), step = 1)
     nf_timeframe = st.sidebar.number_input("Time Frame", min_value = 0, max_value = None, value = int(instrument_settings["time_frame"]), step = 1)
@@ -229,6 +230,7 @@ def display_supertrend():
                 "quantity": nf_quantity
                 }
             common_settings = {
+                "dhan_client_id": dhan_client_id,
                 "dhan_api_token": dhan_api_token
             }
             save_settings(instrument_settings, common_settings, instrument)
