@@ -12,7 +12,8 @@ from datetime import datetime, timedelta
 
 # ---------------------- CONFIG ----------------------
 #API_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzQ3OTAxNjU5LCJ0b2tlbkNvbnN1bWVyVHlwZSI6IlNFTEYiLCJ3ZWJob29rVXJsIjoiIiwiZGhhbkNsaWVudElkIjoiMTEwNDEwODg5MyJ9.Bg1TsNnNTRd6znWPQNgcBB4OAW8I0zjQmwjDcs-o2k3dJJlvGDPnmVgYFb82ID1sur6wN7lNtSh-tnH1L6dGyg"  # Replace with your Dhan access token
-API_URL = "https://api.dhan.co/v2/charts/intraday"
+API_HISTORY_URL = "https://api.dhan.co/v2/charts/intraday"
+API_CURR_POSITIONS = "https://api.dhan.co/v2/positions"
 
 
 USERNAME = "admin"
@@ -65,9 +66,6 @@ def fetch_and_displaydata(instrument, atrperiod, multiplier, timeframe, quantity
 
             st.subheader("📊 Signals Table")
             st.dataframe(df[["close", "supertrend", "di_plus", "di_minus", "entry", "exit"]].tail(2000))
-
-            #st.subheader("📉 Price vs Supertrend")
-            #st.line_chart(df[["close", "supertrend"]])
 
             st.subheader("📍 Last Signal")
             latest_signal = df["entry"].dropna().iloc[-1] if not df["entry"].dropna().empty else "No signal"
@@ -152,7 +150,7 @@ def fetch_data(instrument, timeframe, dhan_api):
 
     }
 
-    res = requests.post(API_URL, json=payload, headers=headers)
+    res = requests.post(API_HISTORY_URL, json=payload, headers=headers)
     if res.status_code != 200:
         st.error(f"Failed to fetch data: {res.status_code} - {res.text}")
         return pd.DataFrame()
@@ -181,6 +179,37 @@ def fetch_data(instrument, timeframe, dhan_api):
         "close": "last",
         "volume": "sum"
     }).dropna()
+
+def fetch_current_orders(dhan_api,instrument):
+    st.subheader("📦 Current Orders")
+    headers = {
+        "access-token": dhan_api,
+	"Accept": "application/json"
+    }
+
+    res = requests.get(API_CURR_POSITIONS, headers=headers)
+
+    if res.status_code != 200:
+        st.error(f"Failed to fetch data: {res.status_code} - {res.text}")
+        return pd.DataFrame()
+
+    data = res.json()
+    if not data:
+        st.warning("No data returned.")
+        return pd.DataFrame()
+    
+    df = pd.DataFrame(data, columns=["tradingSymbol", "positionType", "exchangeSegment", "productType"])
+    fut_df = df[df["tradingSymbol"].str.contains("FUT", na=False)]
+    fut_df = fut_df[fut_df["productType"].str.contains("MARGIN", na=False)]
+    if(instrument["Id"] == "1"):
+        fut_df = fut_df[fut_df["tradingSymbol"].str.contains("NIFTY", na=False)] & ~df["tradingSymbol"].str.contains("BANKNIFTY", na=False)
+    elif(instrument["Id"] == "2"): 
+        fut_df = fut_df[fut_df["tradingSymbol"].str.contains("BANKNIFTY", na=False)]
+    elif(instrument["Id"] == "3"): 
+        fut_df = fut_df[fut_df["tradingSymbol"].str.contains("GOLDM", na=False)]
+    else:
+        fut_df = fut_df[fut_df["tradingSymbol"].str.contains("SIVERM", na=False)]
+    st.dataframe(fut_df[["tradingSymbol", "positionType", "exchangeSegment", "productType"]].tail(2000))
 
 def apply_indicators(df, atr_period, multipliers):
     st_indicator = ta.supertrend(df["high"], df["low"], df["close"], length = atr_period, multiplier = multipliers)
@@ -222,7 +251,7 @@ def display_supertrend():
 
     sidecol1, sidecol2 = st.sidebar.columns([1, 1]) 
     with sidecol1:
-        if st.button("💾 Save Settings"):
+        if st.button("💾 Save"):
             instrument_settings = {
                 "atr_period": nf_atr_period,
                 "multiplier": nf_multiplier,
@@ -239,9 +268,10 @@ def display_supertrend():
     
     with sidecol2:
         st.button("Roll Over")
-    API_TOKEN = dhan_api_token
+
     st.query_params["auth"] = "1"
     fetch_and_displaydata(instrument,nf_atr_period,nf_multiplier,nf_timeframe,nf_multiplier,dhan_api_token)
+    fetch_current_orders(dhan_api_token, instrument)
 
 def generate_signals(df):
     df["long_entry"] = (df["close"] > df["supertrend"]) & (df["di_plus"] > df["di_minus"])
