@@ -208,7 +208,7 @@ def fetch_current_orders(dhan_api,instrument):
     elif(instrument["Id"] == "3"): 
         fut_df = fut_df[fut_df["tradingSymbol"].str.contains("GOLDM", na=False)]
     else:
-        fut_df = fut_df[fut_df["tradingSymbol"].str.contains("SIVERM", na=False)]
+        fut_df = fut_df[fut_df["tradingSymbol"].str.contains("SILVERM", na=False)]
     st.dataframe(fut_df[["tradingSymbol", "positionType", "exchangeSegment", "productType"]].tail(2000))
 
 def apply_indicators(df, atr_period, multipliers):
