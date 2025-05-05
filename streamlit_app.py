@@ -55,21 +55,25 @@ def login():
                 st.error("Invalid username or password")
 
 def fetch_and_displaydata(instrument, atrperiod, multiplier, timeframe, quantity, dhan_api):
-    if is_mcx_tender_period(instrument):
-        st.warning("🚫 MCX trade skipped due to tender period (3 days before expiry).")
-    else:
-        df = fetch_data(instrument, timeframe, dhan_api)
 
-        if not df.empty:
-            df = apply_indicators(df, atrperiod, multiplier )
-            df = generate_signals(df)
+    securityid, expirydate = get_security_id(instrument)
 
-            st.subheader("📊 Signals Table")
-            st.dataframe(df[["close", "supertrend", "di_plus", "di_minus", "entry", "exit"]].tail(2000))
+    df = fetch_data(instrument, timeframe, dhan_api, securityid)
 
-            st.subheader("📍 Last Signal")
-            latest_signal = df["entry"].dropna().iloc[-1] if not df["entry"].dropna().empty else "No signal"
-            st.success(f"🔔 Last Signal: {latest_signal}")
+    if not df.empty:
+        df = apply_indicators(df, atrperiod, multiplier )
+        df = generate_signals(df)
+
+        if is_mcx_tender_period(instrument, expirydate):
+            st.warning("🚫 MCX trade skipped due to tender period (5 days before expiry).\nPlease use roll over option to place next order")
+
+        st.subheader("📊 Signals Table")
+        st.dataframe(df[["close", "supertrend", "di_plus", "di_minus", "entry", "exit"]].tail(2000))
+
+        st.subheader("📍 Last Signal")
+
+        latest_signal = df["entry"].dropna().iloc[-1] if not df["entry"].dropna().empty else "No signal"
+        st.success(f"🔔 Last Signal: {latest_signal}")
         return
 
 def get_security_id(instrument):
@@ -117,14 +121,20 @@ def get_security_id(instrument):
     
     return latest_securityid, latest_expirydate
 
-def is_mcx_tender_period(instrument):
-    securityid, expirydate = get_security_id(instrument)
+def is_mcx_tender_period(instrument, expirydate):
     ts = pd.Timestamp(expirydate)
     expiry = ts.date() #datetime.strptime(expirydate, "%Y-%m-%d")
-    tender_start = expiry - timedelta(days=3)
+    tender_start = expiry - timedelta(days=6)
     return datetime.now().date() >= tender_start and instrument["segment"] == "MCX_COMM"
 
-def fetch_data(instrument, timeframe, dhan_api):
+def is_option_tender_period_expired(instrument, expirydate):
+    ts = pd.Timestamp(expirydate)
+    expiry = ts.date() #datetime.strptime(expirydate, "%Y-%m-%d")
+    tender_start = expiry - timedelta(days=1)
+    return datetime.now().date() >= tender_start and instrument["segment"] == "NSE_FNO"
+
+
+def fetch_data(instrument, timeframe, dhan_api, securityid):
     today = datetime.today()
     from_date = (today - timedelta(days=90)).strftime("%Y-%m-%d")
     to_date = today.strftime("%Y-%m-%d")
@@ -133,7 +143,6 @@ def fetch_data(instrument, timeframe, dhan_api):
         st.warning("Enter a valid api token and try again")
         return pd.DataFrame()
         
-    securityid, expirydate = get_security_id(instrument)
     payload = {
             "securityId": str(securityid),
             "exchangeSegment": instrument["segment"],
@@ -179,6 +188,12 @@ def fetch_data(instrument, timeframe, dhan_api):
         "close": "last",
         "volume": "sum"
     }).dropna()
+
+def prevent_rerun(trigger_key="run_logic"):
+    """Call this function to control rerun behavior."""
+    if trigger_key not in st.session_state:
+        st.session_state[trigger_key] = False
+
 
 def fetch_current_orders(dhan_api,instrument):
     st.subheader("📦 Current Orders")
@@ -232,6 +247,7 @@ def display_supertrend():
             st.session_state.logged_in = False
             st.rerun()
 
+
     st.title("📈 Futures Supertrend(10,2)-ADX")
 
     instrument_name = st.selectbox("Select Instrument", list(instruments.keys()))
@@ -239,6 +255,7 @@ def display_supertrend():
 
     instrument_settings = load_instrument_settings(instrument)
     common_settings = load_common_settings()
+
 
     st.sidebar.header("Parameters")
 
@@ -248,6 +265,10 @@ def display_supertrend():
     nf_multiplier = st.sidebar.number_input("Multiplier", min_value = 0, max_value = None, value = int(instrument_settings["multiplier"]), step = 1)
     nf_timeframe = st.sidebar.number_input("Time Frame", min_value = 0, max_value = None, value = int(instrument_settings["time_frame"]), step = 1)
     nf_quantity = st.sidebar.number_input("Quantity", min_value = 0, max_value = None, value = int(instrument_settings["quantity"]), step = 1)
+
+   
+    fetch_and_displaydata(instrument,nf_atr_period,nf_multiplier,nf_timeframe,nf_multiplier,dhan_api_token)
+    fetch_current_orders(dhan_api_token, instrument)
 
     sidecol1, sidecol2 = st.sidebar.columns([1, 1]) 
     with sidecol1:
@@ -267,11 +288,14 @@ def display_supertrend():
             st.rerun()  # Optional: to reflect updated values immediately
     
     with sidecol2:
-        st.button("Roll Over")
+        if st.button("Roll Over"):
+            st.write("Are you sure you want to continue?")
+            if st.button("Yes"):
+                st.success("Confirmed!")
+            #prevent_rerun()
+            return
 
     st.query_params["auth"] = "1"
-    fetch_and_displaydata(instrument,nf_atr_period,nf_multiplier,nf_timeframe,nf_multiplier,dhan_api_token)
-    fetch_current_orders(dhan_api_token, instrument)
 
 def generate_signals(df):
     df["long_entry"] = (df["close"] > df["supertrend"]) & (df["di_plus"] > df["di_minus"])
