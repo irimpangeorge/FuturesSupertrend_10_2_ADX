@@ -29,10 +29,10 @@ if "logged_in" not in st.session_state:
 
 # List of instruments with mock securityIds (replace with actuals)
 instruments = {
-    "NSE_NIFTY-I": {"Id": "1", "segment": "NSE_FNO","instrumentID":"FUTIDX", "timeframe": 75, "expiry": "2025-04-24"},
-    "NSE_NIFTYBANK-I": {"Id": "2", "segment": "NSE_FNO","instrumentID":"FUTIDX", "timeframe": 75, "expiry": "2025-04-24"},
-    "MCX_GOLDM-I": {"Id": "3", "segment": "MCX_COMM","instrumentID":"FUTCOM", "timeframe": 60, "expiry": "2025-05-05"},
-    "MCX_SILVERM-I": {"Id": "4", "segment": "MCX_COMM","instrumentID":"FUTCOM", "timeframe": 60, "expiry": "2025-04-30"},
+    "NSE_NIFTY-I": {"Id": "1", "securityID": "0", "segment": "NSE_FNO","instrumentID":"FUTIDX", "timeframe": 75, "expiry": "2025-04-24"},
+    "NSE_NIFTYBANK-I": {"Id": "2", "securityID": "0", "segment": "NSE_FNO","instrumentID":"FUTIDX", "timeframe": 75, "expiry": "2025-04-24"},
+    "MCX_GOLDM-I": {"Id": "3", "securityID": "0", "segment": "MCX_COMM","instrumentID":"FUTCOM", "timeframe": 60, "expiry": "2025-05-05"},
+    "MCX_SILVERM-I": {"Id": "4", "securityID": "0", "segment": "MCX_COMM","instrumentID":"FUTCOM", "timeframe": 60, "expiry": "2025-04-30"},
 }
 
 # ---------------------- FUNCTIONS ----------------------
@@ -42,7 +42,7 @@ def login():
     with password_holder.container():
         st.title("🔐 Login")
         username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
+        password = st.text_input("Password", type="password") 
         if st.button("Login"):
             if username == USERNAME and password == PASSWORD:
                 st.session_state["logged_in"] = True
@@ -76,7 +76,7 @@ def fetch_and_displaydata(instrument, atrperiod, multiplier, timeframe, quantity
         st.success(f"🔔 Last Signal: {latest_signal}")
         return
 
-def get_security_id(instrument):
+def get_security_id(instrument, count=0):
     ssl_context = ssl.create_default_context(cafile=certifi.where())
 
 # Step 2: Download the file manually
@@ -116,10 +116,55 @@ def get_security_id(instrument):
     securityid = securityid.sort_values("SM_EXPIRY_DATE")
 
 # Get the latest expiry
-    latest_securityid = securityid["SECURITY_ID"].iloc[0]
-    latest_expirydate = securityid["SM_EXPIRY_DATE"].iloc[0]
+    latest_securityid = securityid["SECURITY_ID"].iloc[count]
+    latest_expirydate = securityid["SM_EXPIRY_DATE"].iloc[count]
     
     return latest_securityid, latest_expirydate
+
+def get_next_order(instrument, count=0):
+    ssl_context = ssl.create_default_context(cafile=certifi.where())
+
+# Step 2: Download the file manually
+    url = "https://images.dhan.co/api-data/api-scrip-master-detailed.csv"
+    context = ssl.create_default_context(cafile=certifi.where())
+    with urllib.request.urlopen(url, context=context) as response:
+        csv_data = response.read().decode("utf-8")
+
+# Step 3: Load into DataFrame
+    scrip_master = pd.read_csv(StringIO(csv_data))
+    if(instrument["Id"] == "1"):
+        securityid = scrip_master[
+            (scrip_master["INSTRUMENT"] == "FUTIDX") &
+            (scrip_master["UNDERLYING_SYMBOL"]=="NIFTY") &
+            (scrip_master["EXCH_ID"] == "NSE")
+            ].copy()
+    elif(instrument["Id"] == "2"): 
+        securityid = scrip_master[
+            (scrip_master["INSTRUMENT"] == "FUTIDX") &
+            (scrip_master["UNDERLYING_SYMBOL"]=="BANKNIFTY") &
+            (scrip_master["EXCH_ID"] == "NSE")
+            ].copy()   
+    elif(instrument["Id"] == "3"): 
+        securityid = scrip_master[
+            (scrip_master["INSTRUMENT"] == "FUTCOM") &
+            (scrip_master["UNDERLYING_SYMBOL"]=="GOLDM") &
+            (scrip_master["EXCH_ID"] == "MCX")
+            ].copy()   
+    else:
+        securityid = scrip_master[
+            (scrip_master["INSTRUMENT"] == "FUTCOM") &
+            (scrip_master["UNDERLYING_SYMBOL"]=="SILVERM") &
+            (scrip_master["EXCH_ID"] == "MCX")
+            ].copy()   
+
+    securityid["SM_EXPIRY_DATE"] = pd.to_datetime(securityid["SM_EXPIRY_DATE"], errors="coerce")
+    securityid = securityid.sort_values("SM_EXPIRY_DATE")
+
+# Get the latest expiry
+    next_order = securityid["SYMBOL_NAME"].iloc[count]
+
+    return next_order
+
 
 def is_mcx_tender_period(instrument, expirydate):
     ts = pd.Timestamp(expirydate)
@@ -225,6 +270,13 @@ def fetch_current_orders(dhan_api,instrument):
     else:
         fut_df = fut_df[fut_df["tradingSymbol"].str.contains("SILVERM", na=False)]
     st.dataframe(fut_df[["tradingSymbol", "positionType", "exchangeSegment", "productType"]].tail(2000))
+    latest_contract = fut_df["tradingSymbol"].dropna().iloc[-1] if not fut_df["tradingSymbol"].dropna().empty else "No Contract"
+    st.success(f"📝  Current contract: {latest_contract}")
+    if latest_contract != "No Contract":
+        next_contract =  get_next_order(instrument, 1)
+    else:
+        next_contract =  get_next_order(instrument, 0)
+    return fut_df, next_contract
 
 def apply_indicators(df, atr_period, multipliers):
     st_indicator = ta.supertrend(df["high"], df["low"], df["close"], length = atr_period, multiplier = multipliers)
@@ -267,11 +319,24 @@ def display_supertrend():
     nf_quantity = st.sidebar.number_input("Quantity", min_value = 0, max_value = None, value = int(instrument_settings["quantity"]), step = 1)
 
    
-    fetch_and_displaydata(instrument,nf_atr_period,nf_multiplier,nf_timeframe,nf_multiplier,dhan_api_token)
-    fetch_current_orders(dhan_api_token, instrument)
+    fetch_and_displaydata(instrument, nf_atr_period, nf_multiplier, nf_timeframe, nf_multiplier, dhan_api_token)
+    currorder, next_contract = fetch_current_orders(dhan_api_token, instrument)
+    col1, col2 = st.sidebar.columns([1, 1]) 
 
-    sidecol1, sidecol2 = st.sidebar.columns([1, 1]) 
-    with sidecol1:
+    with col2:
+        if st.button("Roll Over"):
+            latest_contract = currorder["tradingSymbol"].dropna().iloc[-1] if not currorder["tradingSymbol"].dropna().empty else "No Contract"
+            if latest_contract != "No Contract":
+                st.write("Current contract is:" +latest_contract+ ".\nAre you sure you want to roll over to " + next_contract + "?")
+                answer = st.radio("", ["Yes", "No"], label_visibility="collapsed" )
+                if st.button("Submit"):
+                    st.write(f"You selected: {answer}")
+            else:
+                st.write("Currently no contract. Do you want to roll over to " + next_contract + "?")
+                answer = st.radio("", ["Yes", "No"], label_visibility="collapsed" )
+                if st.button("Submit"):
+                    st.write(f"You selected: {answer}")
+    with col1:
         if st.button("💾 Save"):
             instrument_settings = {
                 "atr_period": nf_atr_period,
@@ -286,14 +351,6 @@ def display_supertrend():
             save_settings(instrument_settings, common_settings, instrument)
             st.success("✅ Settings saved permanently!")
             st.rerun()  # Optional: to reflect updated values immediately
-    
-    with sidecol2:
-        if st.button("Roll Over"):
-            st.write("Are you sure you want to continue?")
-            if st.button("Yes"):
-                st.success("Confirmed!")
-            #prevent_rerun()
-            return
 
     st.query_params["auth"] = "1"
 
