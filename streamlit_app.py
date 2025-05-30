@@ -461,7 +461,6 @@ def display_supertrend():
 
     place_all_orders(dhan_api_token)
     currorder, next_contract = fetch_and_displaydata(instrument, nf_atr_period, nf_multiplier, nf_timeframe, nf_quantity, dhan_api_token)
-    st.write(refreshtime)
     st_autorefresh(interval= refreshtime * 60 * 1000, limit=None, key="auto_refresh")
 
     col1, col2 = st.sidebar.columns([1, 1]) 
